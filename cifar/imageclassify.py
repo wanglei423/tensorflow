@@ -8,31 +8,38 @@ from tensorflow import keras
 from tensorflow.keras import layers
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.preprocessing import image 
 
-
-def visualizeData(train_generator):
-    labels = (train_generator.class_indices)
+def get_class_names(data_generator):
+    labels = (data_generator.class_indices)
     print(labels)
     class_names = [k for k,v in labels.items()]
-
     print(class_names)
+    return class_names
 
-    import matplotlib.pyplot as plt
-
-    plt.figure(figsize=(10,10))
+def visualizeData(train_generator):
+    class_names = get_class_names(train_generator)
     for images, classes in train_generator:
         print("batch shape=%s, min=%.3f, max=%.3f" %(images.shape, images.min(), images.max()))
         #print("batch labels shape=%s" %(labels.shape))
         #print(labels)
-        for i in range(9):
-            ax = plt.subplot(3,3,i+1)
-            plt.imshow(images[i])
+        class_names_list = []
+        for i in range(len(images) - 1):
             class_index = classes[i].tolist().index(1)
-            plt.title(class_names[class_index])
-            plt.axis("on")
+            class_names_list.append(class_names[class_index])
 
-        plt.show()
+        visualizeData(images, class_names_list)
 
+import matplotlib.pyplot as plt
+def visualizeData(images, class_names=[]):
+    plt.figure(figsize=(10,10))
+    for i in range(9):
+        ax = plt.subplot(3,3,i+1)
+        plt.imshow(images[i])
+        if class_names:
+            plt.title(class_names[i])
+        plt.axis("on")
+    plt.show()
 
 print(tf.__version__)
 
@@ -83,6 +90,7 @@ def get_train_generator():
         train_datagen = tf.keras.preprocessing.image.ImageDataGenerator(
             rotation_range=40,
             horizontal_flip=True,
+            vertical_flip=True,
             width_shift_range=0.2,
             height_shift_range=0.2,
             shear_range=0.2,
@@ -118,12 +126,13 @@ def get_dataset(data_generator):
 def get_model():
     num_classes = 5
     model = Sequential([
-        layers.Conv2D(32,3, activation='relu', input_shape=(img_height,img_width,3)),
+        layers.Conv2D(16,3, padding='same', activation='relu', input_shape=(img_height,img_width,3)),
         layers.MaxPooling2D(),
-        layers.Conv2D(32,3, activation='relu'),
+        layers.Conv2D(32,3, padding='same', activation='relu'),
         layers.MaxPooling2D(),
-        layers.Conv2D(32,3, activation='relu'),
+        layers.Conv2D(64,3, padding='same', activation='relu'),
         layers.MaxPooling2D(),
+        layers.Dropout(0.2),
         layers.Flatten(),
         layers.Dense(128, activation='relu'),
         layers.Dense(num_classes)
@@ -143,34 +152,38 @@ def get_model_v2():
         keras.layers.MaxPool2D(2,2),
         keras.layers.Conv2D(128, (3,3), activation='relu'),
         keras.layers.MaxPool2D(2,2),
-        keras.layers.Conv2D(128, (3,3), activation='relu'),
-        keras.layers.MaxPool2D(2,2),
         keras.layers.Flatten(),
-        keras.layers.Dropout(0.5),
-        keras.layers.Dense(512, activation='relu'),
+        keras.layers.Dropout(0.2),
+        keras.layers.Dense(128, activation='relu'),
         keras.layers.Dense(num_classes)
     ])
     model.compile(optimizer='adam',
                   loss=tf.keras.losses.CategoricalCrossentropy(from_logits=True),
-                    metrics=['acc'])
+                    metrics=['accuracy'])
     model.summary()
     return model
-
+EPOCHS = 30
+STEPS_PER_EPOCH = 300
+VALIDATION_STEPS = 40
+MODEL_FILE_NAME = "/home/wanglei/flowers_classify_20200913.h5"
 def train_model(model):
     data_generator = get_train_generator()
+    train_generator = data_generator[0]
+    validation_generator = data_generator[1]
     history = model.fit_generator(
-        data_generator[0],
-        steps_per_epoch=500,
-        epochs=10,
-        validation_data=data_generator[1],
-        validation_steps=50
+        train_generator,
+        steps_per_epoch=STEPS_PER_EPOCH,
+        epochs=EPOCHS,
+        validation_data=validation_generator,
+        validation_steps=VALIDATION_STEPS
     )
+    model.save(MODEL_FILE_NAME)
     return history
 
 def draw_history_graph(history):
-    acc_train = history.history['acc']
-    acc_val = history.history['val_acc']
-    epochs = range(1,81)
+    acc_train = history.history['accuracy']
+    acc_val = history.history['val_accuracy']
+    epochs = range(1,EPOCHS+1)
     plt.plot(epochs, acc_train, 'g', label='training accuracy')
     plt.plot(epochs, acc_val, 'b', label='validation accuracy')
     plt.title('Training and Validation accuracy')
@@ -179,4 +192,50 @@ def draw_history_graph(history):
     plt.legend()
     plt.show()
 
-draw_history_graph(train_model(get_model_v2()))
+def load_model(model):
+    model.load_weights(MODEL_FILE_NAME)
+    return model
+
+''' classes names:
+{'daisy': 0, 'dandelion': 1, 'roses': 2, 'sunflowers': 3, 'tulips': 4}
+['daisy', 'dandelion', 'roses', 'sunflowers', 'tulips']
+'''
+def predict_image(model):
+    picture_set_name = "tulips"
+    image_files = list(pathlib.Path(data_dir_str).glob("{}/*.jpg".format(picture_set_name)))
+    class_names = get_class_names(get_train_generator()[0])
+    images = []
+    classes = []
+    titles = []
+    correct_count = 0
+    total_count = 500
+    for k in range(total_count) :
+        image_file = image_files[k]
+        print(str(k) + " : " + str(image_file)[-10:] + "  ==========> loading image: ", str(image_file))
+        img = image.load_img(str(image_file), target_size=(img_height, img_width))
+        images.append(img)
+        titles.append(str(image_file)[-10:])
+        x = image.img_to_array(img)
+        #x = x.reshape((1,) + x.shape)
+        #print(str(image_file) + ":", model.predict(x))
+
+        img_array = tf.expand_dims(x, 0) # Create a batch
+        predictions = model.predict(img_array)
+        print("raw predictions: " + str(predictions[0].tolist()))
+        score = tf.nn.softmax(predictions[0])
+        #print(str(image_file) + ", score:", score)
+        #print("prediction softmax score: " + str(score))
+        classes.append(score)
+        print(
+            "This image most likely belongs to {} with a {:.2f} percent confidence."
+            .format(class_names[np.argmax(score)], 100 * np.max(score))
+        )
+        if class_names[np.argmax(score)] == picture_set_name:
+            correct_count += 1
+        #PIL.Image.open(str(image_file)).show()
+    print("correctness {}/{}".format(correct_count, total_count))    
+    #visualizeData(images, titles)
+
+#draw_history_graph(train_model(get_model()))
+predict_image(load_model(get_model()))
+#predict_image(load_model(get_model_v2()))
